@@ -486,6 +486,41 @@
         // Dados das versões
         const changelogData = [
             {
+                version: "3.5.0",
+                date: "2025-09-19",
+                title: "🚀 Melhorias Significativas de Layout e Sincronização",
+                description: "Grandes melhorias na responsividade mobile e sistema de sincronização completamente reformulado com JSONBin.io",
+                categories: [
+                    {
+                        name: "🎨 Layout e Responsividade",
+                        changes: [
+                            { type: "fixed", text: "<strong>Modal de Sincronização:</strong> Corrigido z-index para sempre aparecer por cima" },
+                            { type: "improved", text: "<strong>Responsividade Mobile:</strong> Formulários agora se ajustam perfeitamente em telas pequenas" },
+                            { type: "fixed", text: "<strong>Inputs Mobile:</strong> Corrigido problema de campos saindo da tela em dispositivos móveis" },
+                            { type: "improved", text: "<strong>Interface Touch:</strong> Melhorado tamanho de botões e campos para dispositivos touch" }
+                        ]
+                    },
+                    {
+                        name: "☁️ Sistema de Sincronização Aprimorado",
+                        changes: [
+                            { type: "new", text: "<strong>JSONBin.io:</strong> Migrado para serviço mais confiável que jsonstore.io" },
+                            { type: "improved", text: "<strong>Duração Estendida:</strong> Códigos de pareamento agora duram 24 horas (antes: 15 min)" },
+                            { type: "improved", text: "<strong>Mensagens Específicas:</strong> Erros agora indicam problema exato (conexão, código expirado, etc.)" },
+                            { type: "new", text: "<strong>Melhor Rastreamento:</strong> Sistema aprimorado para gerenciar Bin IDs" },
+                            { type: "improved", text: "<strong>Fallback Inteligente:</strong> Se cloud falhar, usa localStorage automaticamente" }
+                        ]
+                    },
+                    {
+                        name: "🛠️ Melhorias Técnicas",
+                        changes: [
+                            { type: "improved", text: "<strong>Performance:</strong> Carregamento mais rápido e eficiente" },
+                            { type: "improved", text: "<strong>Confiabilidade:</strong> Melhor tratamento de erros de conexão" },
+                            { type: "improved", text: "<strong>Compatibilidade:</strong> Testado em mais dispositivos e navegadores" }
+                        ]
+                    }
+                ]
+            },
+            {
                 version: "3.4.0",
                 date: "2025-09-19",
                 type: "major",

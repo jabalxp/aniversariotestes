@@ -800,62 +800,77 @@ class BirthdayManager {
     
     async saveSyncData(code, data) {
         try {
-            // Usar jsonstore.io - serviço gratuito para armazenar JSON
-            const response = await fetch(`https://www.jsonstore.io/birthday-sync/${code}`, {
+            // JSONBin.io - Serviço gratuito e confiável
+            const response = await fetch('https://api.jsonbin.io/v3/b', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-Bin-Name': `birthday-sync-${code}`,
+                    'X-Bin-Private': 'false'
                 },
                 body: JSON.stringify({
+                    code: code,
                     data: data,
-                    expires: Date.now() + (15 * 60 * 1000), // 15 minutos
+                    expires: Date.now() + (24 * 60 * 60 * 1000), // 24 horas
                     created: Date.now()
                 })
             });
-            
+
             if (response.ok) {
-                console.log(`Dados salvos na nuvem com código: ${code}`);
-                return true;
+                const result = await response.json();
+                console.log(`✅ Dados salvos na nuvem! Bin ID: ${result.metadata.id}`);
+                
+                // Salvar o ID do bin localmente para uso posterior
+                localStorage.setItem(`sync_bin_${code}`, result.metadata.id);
+                return result.metadata.id;
             } else {
                 throw new Error(`Erro HTTP: ${response.status}`);
             }
         } catch (error) {
-            console.error('Erro ao salvar na nuvem:', error);
+            console.warn('❌ Erro ao salvar na nuvem, usando fallback local:', error);
             // Fallback: salvar localmente para teste
             localStorage.setItem(`SYNC_${code}`, JSON.stringify({
                 data: data,
-                expires: Date.now() + (15 * 60 * 1000),
+                expires: Date.now() + (24 * 60 * 60 * 1000),
                 created: Date.now()
             }));
-            console.log(`Fallback: dados salvos localmente com código: ${code}`);
-            return true;
+            console.log(`📱 Fallback: dados salvos localmente com código: ${code}`);
+            return 'local';
         }
     }
     
     async loadSyncData(code) {
         try {
-            // Tentar carregar da nuvem primeiro
-            const response = await fetch(`https://www.jsonstore.io/birthday-sync/${code}`);
+            // Primeiro, tentar buscar o Bin ID salvo localmente
+            const binId = localStorage.getItem(`sync_bin_${code}`);
             
-            if (response.ok) {
-                const result = await response.json();
+            if (binId && binId !== 'local') {
+                // Tentar carregar do JSONBin.io
+                const response = await fetch(`https://api.jsonbin.io/v3/b/${binId}`, {
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
                 
-                // Verificar se existe e não expirou
-                if (result.result && result.result.expires > Date.now()) {
-                    console.log(`Dados carregados da nuvem com código: ${code}`);
-                    return result.result.data;
-                } else if (result.result) {
-                    console.log(`Código ${code} expirado na nuvem`);
-                    // Tentar deletar código expirado
-                    fetch(`https://www.jsonstore.io/birthday-sync/${code}`, { method: 'DELETE' }).catch(() => {});
-                    return null;
+                if (response.ok) {
+                    const result = await response.json();
+                    const syncData = result.record;
+                    
+                    // Verificar se não expirou
+                    if (syncData.expires > Date.now()) {
+                        console.log(`✅ Dados carregados da nuvem! Código: ${code}`);
+                        return syncData.data;
+                    } else {
+                        console.log(`⏰ Código ${code} expirado na nuvem`);
+                        localStorage.removeItem(`sync_bin_${code}`);
+                        return null;
+                    }
                 } else {
-                    console.log(`Código ${code} não encontrado na nuvem`);
-                    return null;
+                    console.log(`❌ Bin ${binId} não encontrado na nuvem`);
                 }
             }
         } catch (error) {
-            console.warn('Erro ao carregar da nuvem, tentando localhost:', error);
+            console.warn('⚠️ Erro ao carregar da nuvem, tentando fallback local:', error);
         }
         
         try {
@@ -865,21 +880,20 @@ class BirthdayManager {
             if (stored) {
                 const parsed = JSON.parse(stored);
                 
-                // Verificar se expirou
-                if (Date.now() > parsed.expires) {
+                // Verificar se não expirou
+                if (Date.now() < parsed.expires) {
+                    console.log(`📱 Dados carregados do fallback local: ${code}`);
+                    return parsed.data;
+                } else {
                     localStorage.removeItem(`SYNC_${code}`);
-                    console.log(`Código ${code} expirado localmente`);
-                    return null;
+                    console.log(`⏰ Código ${code} expirado localmente`);
                 }
-                
-                console.log(`Dados carregados localmente com código: ${code}`);
-                return parsed.data;
             }
             
-            console.log(`Código ${code} não encontrado`);
+            console.log(`❌ Código ${code} não encontrado em lugar nenhum`);
             return null;
         } catch (error) {
-            console.error('Erro ao carregar dados:', error);
+            console.error('❌ Erro ao carregar dados:', error);
             return null;
         }
     }
@@ -893,7 +907,7 @@ class BirthdayManager {
         modal.classList.remove('hidden');
         setTimeout(() => modal.classList.add('show'), 10);
         
-        // Iniciar timer de 15 minutos
+        // Iniciar timer de 24 horas
         this.startCodeTimer(timerElement, code);
     }
     
@@ -909,18 +923,19 @@ class BirthdayManager {
     }
     
     startCodeTimer(timerElement, code) {
-        let timeLeft = 15 * 60; // 15 minutos em segundos
+        let timeLeft = 24 * 60 * 60; // 24 horas em segundos
         
         this.codeTimer = setInterval(() => {
-            const minutes = Math.floor(timeLeft / 60);
+            const hours = Math.floor(timeLeft / 3600);
+            const minutes = Math.floor((timeLeft % 3600) / 60);
             const seconds = timeLeft % 60;
             
-            timerElement.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            timerElement.textContent = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
             
-            // Mudar cor conforme o tempo
-            if (timeLeft <= 60) {
+            // Mudar cor conforme o tempo (últimas 2 horas = warning, última hora = danger)
+            if (timeLeft <= 3600) {
                 timerElement.className = 'code-timer danger';
-            } else if (timeLeft <= 300) {
+            } else if (timeLeft <= 7200) {
                 timerElement.className = 'code-timer warning';
             }
             
@@ -929,8 +944,10 @@ class BirthdayManager {
             if (timeLeft < 0) {
                 clearInterval(this.codeTimer);
                 localStorage.removeItem(`SYNC_${code}`);
+                const binId = localStorage.getItem(`sync_bin_${code}`);
+                if (binId) localStorage.removeItem(`sync_bin_${code}`);
                 this.hideCodeModal();
-                this.showNotification('⏰ Código expirado!', 'error');
+                this.showNotification('⏰ Código expirado após 24 horas!', 'error');
             }
         }, 1000);
     }
