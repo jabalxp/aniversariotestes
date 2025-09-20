@@ -3,10 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Nunca mais esqueça uma data importante! Sistema completo de lembretes com notificações inteligentes.">
+    <meta name="theme-color" content="#667eea">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Aniversários">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='15%' fill='%23667eea'/><text x='50%' y='50%' font-size='100' text-anchor='middle' dominant-baseline='central'>🎂</text></svg>">
     <title>🎂 Lembrete de Aniversários</title>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script defer src="https://unpkg.com/@vercel/analytics@latest/dist/index.js"></script>
     <style>
         * {
             margin: 0;
@@ -128,6 +134,55 @@
             margin-top: 10px;
         }
 
+        @media (max-width: 768px) {
+            .menu-container {
+                padding: 30px 25px;
+                max-width: 90%;
+            }
+            
+            .title {
+                font-size: 2.2rem;
+            }
+            
+            .logo {
+                font-size: 3.5rem;
+            }
+            
+            .menu-button {
+                padding: 16px 20px;
+                font-size: 1.1rem;
+            }
+            
+            .subtitle {
+                font-size: 1rem;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .menu-container {
+                padding: 25px 20px;
+                max-width: 95%;
+            }
+            
+            .title {
+                font-size: 2rem;
+            }
+            
+            .logo {
+                font-size: 3.2rem;
+            }
+            
+            .menu-button {
+                padding: 14px 18px;
+                font-size: 1rem;
+            }
+            
+            .subtitle {
+                font-size: 0.95rem;
+                margin-bottom: 30px;
+            }
+        }
+
         @media (max-width: 480px) {
             .menu-container {
                 padding: 40px 30px;
@@ -144,6 +199,73 @@
             .menu-button {
                 padding: 18px 25px;
                 font-size: 1.1rem;
+            }
+        }
+
+        @media (max-width: 375px) {
+            .menu-container {
+                padding: 30px 20px;
+                margin: 10px;
+            }
+            
+            .title {
+                font-size: 1.8rem;
+                line-height: 1.2;
+            }
+            
+            .logo {
+                font-size: 2.8rem;
+            }
+            
+            .menu-button {
+                padding: 16px 20px;
+                font-size: 1rem;
+                gap: 12px;
+            }
+            
+            .menu-button i {
+                font-size: 1.3rem;
+            }
+            
+            .subtitle {
+                font-size: 0.9rem;
+                margin-bottom: 25px;
+            }
+            
+            .version-info {
+                margin-top: 25px;
+                font-size: 0.85rem;
+            }
+        }
+
+        @media (max-width: 320px) {
+            .menu-container {
+                padding: 25px 15px;
+                margin: 5px;
+            }
+            
+            .title {
+                font-size: 1.6rem;
+            }
+            
+            .logo {
+                font-size: 2.5rem;
+                margin-bottom: 15px;
+            }
+            
+            .menu-button {
+                padding: 14px 16px;
+                font-size: 0.95rem;
+                gap: 10px;
+            }
+            
+            .menu-button i {
+                font-size: 1.2rem;
+            }
+            
+            .subtitle {
+                font-size: 0.85rem;
+                margin-bottom: 20px;
             }
         }
     </style>
@@ -171,7 +293,7 @@
         
         <div class="version-info">
             <p>Sistema completo de lembretes com notificações</p>
-                                <span class="version">v3.5.0</span>
+            <span class="version-badge">v3.3.0</span>
         </div>
     </div>
 
@@ -200,5 +322,8 @@
             });
         });
     </script>
+    
+    <!-- Vercel Analytics -->
+    <script type="module" src="analytics.js"></script>
 </body>
 </html>

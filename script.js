@@ -72,12 +72,14 @@ class BirthdayManager {
     constructor() {
         this.birthdays = this.loadBirthdays();
         this.notificationSettings = this.loadNotificationSettings();
+        this.setupAdvancedNotifications();
         this.initializeEventListeners();
-        this.initializeEmergencyBackup(); // Sistema de backup de emergência
         this.requestNotificationPermission();
+        this.checkNotificationPermissionStatus();
         this.renderBirthdays();
         this.updateStats();
         this.checkNotifications();
+        this.checkAdvancedNotifications();
         this.startNotificationTimer();
     }
 
@@ -196,26 +198,6 @@ class BirthdayManager {
         // Preview da foto
         document.getElementById('person-photo').addEventListener('change', this.previewPhoto);
 
-        // Sincronização
-        document.getElementById('generate-code-btn').addEventListener('click', () => {
-            this.generateSyncCode();
-        });
-
-        document.getElementById('sync-code-btn').addEventListener('click', () => {
-            this.syncFromCode();
-        });
-
-        document.getElementById('close-code-modal').addEventListener('click', () => {
-            this.hideCodeModal();
-        });
-
-        // Permitir enter no campo de código
-        document.getElementById('sync-code-input').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                this.syncFromCode();
-            }
-        });
-
         // Filtros
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -245,6 +227,38 @@ class BirthdayManager {
         document.getElementById('deny-notifications').addEventListener('click', () => {
             this.hideNotificationPermission();
         });
+
+        // Configurações de notificação
+        document.getElementById('toggle-settings')?.addEventListener('click', () => {
+            this.toggleNotificationSettings();
+        });
+
+        document.getElementById('save-settings')?.addEventListener('click', () => {
+            this.saveNotificationSettings();
+        });
+
+        document.getElementById('test-notification')?.addEventListener('click', () => {
+            this.testNotification();
+        });
+
+        // Event listeners para checkboxes de configuração
+        const settingCheckboxes = [
+            'notify-on-day', 'notify-day-before', 'notify-3-days',
+            'notify-1-week', 'notify-2-weeks', 'notify-1-month',
+            'sound-enabled', 'persistent-notifications', 'background-notifications'
+        ];
+
+        settingCheckboxes.forEach(id => {
+            const checkbox = document.getElementById(id);
+            if (checkbox) {
+                checkbox.addEventListener('change', () => {
+                    this.updateNotificationSetting(id, checkbox.checked);
+                });
+            }
+        });
+
+        // Carregar configurações na interface
+        this.loadSettingsToInterface();
     }
 
     // Adicionar novo aniversário
@@ -296,6 +310,8 @@ class BirthdayManager {
         this.resetForm();
         this.showNotification(`Aniversário de ${birthday.name} adicionado com sucesso!`, 'success');
         this.checkNotifications();
+        this.checkAdvancedNotifications();
+        this.requestServiceWorkerCheck();
     }
 
     // Preview da foto
@@ -556,7 +572,11 @@ class BirthdayManager {
                 if (force) {
                     Notification.requestPermission().then(permission => {
                         if (permission === 'granted') {
-                            this.showNotification('Notificações ativadas com sucesso!', 'success');
+                            this.showNotification('Notificações ativadas com sucesso! Você receberá lembretes mesmo quando não estiver no site.', 'success');
+                            // Ativar Service Worker para notificações em background
+                            this.activateBackgroundNotifications();
+                        } else {
+                            this.showNotification('Notificações negadas. Você pode ativar nas configurações do navegador.', 'error');
                         }
                         this.hideNotificationPermission();
                     });
@@ -566,6 +586,45 @@ class BirthdayManager {
                         document.getElementById('notification-permission').classList.add('show');
                     }, 3000);
                 }
+            } else if (Notification.permission === 'granted') {
+                // Garantir que background notifications estejam ativas
+                this.activateBackgroundNotifications();
+            }
+        } else {
+            this.showNotification('Seu navegador não suporta notificações.', 'error');
+        }
+    }
+
+    // Ativar notificações em background
+    activateBackgroundNotifications() {
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.ready.then(registration => {
+                console.log('Notificações em background ativadas');
+                // Informar ao service worker que as notificações estão ativas
+                if (registration.active) {
+                    registration.active.postMessage({
+                        type: 'NOTIFICATIONS_ENABLED',
+                        settings: this.advancedNotificationSettings
+                    });
+                }
+            });
+        }
+    }
+
+    // Verificar status das permissões periodicamente
+    checkNotificationPermissionStatus() {
+        if ('Notification' in window) {
+            const permission = Notification.permission;
+            
+            if (permission === 'denied') {
+                this.showNotificationBanner(
+                    '⚠️ Notificações bloqueadas. Para receber lembretes, ative as notificações nas configurações do navegador.'
+                );
+            } else if (permission === 'default') {
+                // Mostrar prompt após algum tempo de uso
+                setTimeout(() => {
+                    this.requestNotificationPermission();
+                }, 10000); // 10 segundos
             }
         }
     }
@@ -652,10 +711,13 @@ class BirthdayManager {
 
     // Iniciar timer para verificar notificações periodicamente
     startNotificationTimer() {
-        // Verificar a cada hora
+        // Verificar imediatamente
+        this.checkNotifications();
+        
+        // Verificar a cada 30 minutos quando a página está ativa
         setInterval(() => {
             this.checkNotifications();
-        }, 60 * 60 * 1000);
+        }, 30 * 60 * 1000);
 
         // Verificar à meia-noite usando timeout calculado manualmente
         const now = new Date();
@@ -672,382 +734,257 @@ class BirthdayManager {
                 this.checkNotifications();
             }, 24 * 60 * 60 * 1000);
         }, msUntilMidnight);
+
+        // Configurar comunicação com Service Worker
+        this.setupServiceWorkerCommunication();
     }
 
-    // 🔄 SISTEMA DE SINCRONIZAÇÃO EM NUVEM 🔄
-    async generateSyncCode() {
-        const btn = document.getElementById('generate-code-btn');
-        const originalText = btn.innerHTML;
-        
-        try {
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gerando...';
-            
-            // Gerar código único
-            const code = this.generateRandomCode();
-            
-            // Preparar dados para sincronização
-            const syncData = {
-                birthdays: this.birthdays,
-                notificationSettings: this.notificationSettings,
-                timestamp: Date.now(),
-                version: '3.4.0'
-            };
-            
-            // Salvar na nuvem (JSONBin.io - gratuito)
-            const success = await this.saveSyncData(code, syncData);
-            
-            if (success) {
-                this.showCodeModal(code);
-                this.updateSyncStatus('online');
-            } else {
-                throw new Error('Falha ao salvar dados na nuvem');
-            }
-            
-        } catch (error) {
-            console.error('Erro ao gerar código:', error);
-            this.showNotification('❌ Erro ao gerar código. Verifique sua conexão!', 'error');
-            this.updateSyncStatus('offline');
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-        }
-    }
-    
-    async syncFromCode() {
-        const codeInput = document.getElementById('sync-code-input');
-        const btn = document.getElementById('sync-code-btn');
-        const code = codeInput.value.trim().toUpperCase();
-        
-        if (!code || code.length !== 6) {
-            this.showNotification('⚠️ Digite um código válido de 6 caracteres!', 'error');
-            return;
-        }
-        
-        const originalText = btn.innerHTML;
-        
-        try {
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sincronizando...';
-            this.updateSyncStatus('syncing');
-            
-            // Buscar dados da nuvem
-            const syncData = await this.loadSyncData(code);
-            
-            if (syncData) {
-                // Confirmar sincronização
-                const confirm = window.confirm(
-                    `📱 Dados encontrados!\n\n` +
-                    `• ${syncData.birthdays.length} aniversário(s)\n` +
-                    `• Versão: ${syncData.version}\n` +
-                    `• Data: ${new Date(syncData.timestamp).toLocaleString('pt-BR')}\n\n` +
-                    `⚠️ Seus dados atuais serão substituídos. Continuar?`
-                );
-                
-                if (confirm) {
-                    // Aplicar dados sincronizados
-                    this.birthdays = syncData.birthdays;
-                    this.notificationSettings = syncData.notificationSettings || {};
-                    
-                    // Salvar localmente
-                    this.saveBirthdays();
-                    this.saveNotificationSettings();
-                    
-                    // Atualizar interface
-                    this.renderBirthdays();
-                    this.updateStats();
-                    this.checkNotifications();
-                    
-                    this.showNotification(`✅ ${syncData.birthdays.length} aniversário(s) sincronizados com sucesso!`, 'success');
-                    this.updateSyncStatus('online');
-                    codeInput.value = '';
-                } else {
-                    this.updateSyncStatus('offline');
-                }
-            } else {
-                throw new Error('Código não encontrado ou expirado');
-            }
-            
-        } catch (error) {
-            console.error('Erro na sincronização:', error);
-            
-            // Mensagens de erro mais específicas
-            let errorMessage = '❌ Erro na sincronização: ';
-            if (error.message.includes('Failed to fetch')) {
-                errorMessage = '🌐 Problema de conexão. Verifique sua internet e tente novamente.';
-            } else if (error.message.includes('não encontrado')) {
-                errorMessage = '⏰ Código não existe ou expirou (códigos duram 24h). Gere um novo código no outro dispositivo.';
-            } else {
-                errorMessage = '❌ Código inválido. Verifique se digitou corretamente.';
-            }
-            
-            this.showNotification(errorMessage, 'error');
-            this.updateSyncStatus('offline');
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-        }
-    }
-    
-    generateRandomCode() {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        let result = '';
-        for (let i = 0; i < 6; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return result;
-    }
-    
-    async saveSyncData(code, data) {
-        try {
-            // JSONBin.io - Serviço gratuito e confiável
-            const response = await fetch('https://api.jsonbin.io/v3/b', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Bin-Name': `birthday-sync-${code}`,
-                    'X-Bin-Private': 'false'
-                },
-                body: JSON.stringify({
-                    code: code,
-                    data: data,
-                    expires: Date.now() + (24 * 60 * 60 * 1000), // 24 horas
-                    created: Date.now()
-                })
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                console.log(`✅ Dados salvos na nuvem! Bin ID: ${result.metadata.id}`);
-                
-                // Salvar o ID do bin localmente para uso posterior
-                localStorage.setItem(`sync_bin_${code}`, result.metadata.id);
-                return result.metadata.id;
-            } else {
-                throw new Error(`Erro HTTP: ${response.status}`);
-            }
-        } catch (error) {
-            console.warn('❌ Erro ao salvar na nuvem, usando fallback local:', error);
-            // Fallback: salvar localmente para teste
-            localStorage.setItem(`SYNC_${code}`, JSON.stringify({
-                data: data,
-                expires: Date.now() + (24 * 60 * 60 * 1000),
-                created: Date.now()
-            }));
-            console.log(`📱 Fallback: dados salvos localmente com código: ${code}`);
-            return 'local';
-        }
-    }
-    
-    async loadSyncData(code) {
-        try {
-            // Primeiro, tentar buscar o Bin ID salvo localmente
-            const binId = localStorage.getItem(`sync_bin_${code}`);
-            
-            if (binId && binId !== 'local') {
-                // Tentar carregar do JSONBin.io
-                const response = await fetch(`https://api.jsonbin.io/v3/b/${binId}`, {
-                    headers: {
-                        'Content-Type': 'application/json'
+    // Configurar comunicação com Service Worker
+    setupServiceWorkerCommunication() {
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                if (event.data) {
+                    switch (event.data.type) {
+                        case 'GET_BIRTHDAYS':
+                            event.ports[0].postMessage({
+                                type: 'GET_BIRTHDAYS_RESPONSE',
+                                data: this.birthdays
+                            });
+                            break;
+                        case 'GET_NOTIFICATION_SETTINGS':
+                            event.ports[0].postMessage({
+                                type: 'GET_NOTIFICATION_SETTINGS_RESPONSE',
+                                data: this.notificationSettings
+                            });
+                            break;
+                        case 'SAVE_NOTIFICATION_SETTINGS':
+                            this.notificationSettings = { ...this.notificationSettings, ...event.data.data };
+                            this.saveNotificationSettings();
+                            break;
                     }
+                }
+            });
+        }
+    }
+
+    // Solicitar verificação no Service Worker
+    requestServiceWorkerCheck() {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+                type: 'CHECK_BIRTHDAYS'
+            });
+        }
+    }
+
+    // Melhorar sistema de notificações com configurações personalizadas
+    setupAdvancedNotifications() {
+        // Configurações padrão de notificação
+        const defaultSettings = {
+            enabled: true,
+            notifyOnDay: true,
+            notifyDayBefore: true,
+            notify3DaysBefore: true,
+            notify1WeekBefore: true,
+            notify2WeeksBefore: false,
+            notify1MonthBefore: false,
+            soundEnabled: true,
+            persistentNotifications: true
+        };
+
+        // Carregar ou definir configurações
+        const savedSettings = localStorage.getItem('advancedNotificationSettings');
+        this.advancedNotificationSettings = savedSettings ? 
+            { ...defaultSettings, ...JSON.parse(savedSettings) } : defaultSettings;
+    }
+
+    // Salvar configurações avançadas
+    saveAdvancedNotificationSettings() {
+        localStorage.setItem('advancedNotificationSettings', 
+            JSON.stringify(this.advancedNotificationSettings));
+    }
+
+    // Verificar notificações com configurações avançadas
+    checkAdvancedNotifications() {
+        if (!this.advancedNotificationSettings.enabled) return;
+
+        const today = DateUtils.getToday();
+        const todayStr = `${today.year}-${today.month}-${today.day}`;
+
+        this.birthdays.forEach(birthday => {
+            const days = this.calculateDaysUntilBirthday(birthday.date);
+            const notificationKey = `${birthday.id}_${todayStr}`;
+
+            // Verificar se já notificou hoje para esta pessoa
+            if (this.notificationSettings[notificationKey]) return;
+
+            let shouldNotify = false;
+            let message = '';
+            let priority = 'normal';
+
+            // Regras de notificação baseadas nas configurações
+            if (days === 0 && this.advancedNotificationSettings.notifyOnDay) {
+                shouldNotify = true;
+                message = `🎉 Hoje é aniversário de ${birthday.name}! 🎂`;
+                priority = 'high';
+            } else if (days === 1 && this.advancedNotificationSettings.notifyDayBefore) {
+                shouldNotify = true;
+                message = `🎈 Amanhã é aniversário de ${birthday.name}!`;
+                priority = 'high';
+            } else if (days === 3 && this.advancedNotificationSettings.notify3DaysBefore) {
+                shouldNotify = true;
+                message = `⏰ Faltam 3 dias para o aniversário de ${birthday.name}!`;
+            } else if (days === 7 && this.advancedNotificationSettings.notify1WeekBefore) {
+                shouldNotify = true;
+                message = `📅 Falta uma semana para o aniversário de ${birthday.name}!`;
+            } else if (days === 14 && this.advancedNotificationSettings.notify2WeeksBefore) {
+                shouldNotify = true;
+                message = `🗓️ Faltam 14 dias para o aniversário de ${birthday.name}!`;
+            } else if (days === 30 && this.advancedNotificationSettings.notify1MonthBefore) {
+                shouldNotify = true;
+                message = `📆 Falta um mês para o aniversário de ${birthday.name}!`;
+            }
+
+            if (shouldNotify) {
+                this.showNotificationBanner(message);
+                this.sendAdvancedBrowserNotification(`Lembrete de Aniversário`, message, {
+                    priority: priority,
+                    birthday: birthday,
+                    daysUntil: days
                 });
                 
-                if (response.ok) {
-                    const result = await response.json();
-                    const syncData = result.record;
-                    
-                    // Verificar se não expirou
-                    if (syncData.expires > Date.now()) {
-                        console.log(`✅ Dados carregados da nuvem! Código: ${code}`);
-                        return syncData.data;
-                    } else {
-                        console.log(`⏰ Código ${code} expirado na nuvem`);
-                        localStorage.removeItem(`sync_bin_${code}`);
-                        return null;
-                    }
-                } else {
-                    console.log(`❌ Bin ${binId} não encontrado na nuvem`);
-                }
+                // Marcar como notificado
+                this.notificationSettings[notificationKey] = true;
+                this.saveNotificationSettings();
             }
-        } catch (error) {
-            console.warn('⚠️ Erro ao carregar da nuvem, tentando fallback local:', error);
-        }
-        
-        try {
-            // Fallback: tentar carregar do localStorage
-            const stored = localStorage.getItem(`SYNC_${code}`);
-            
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                
-                // Verificar se não expirou
-                if (Date.now() < parsed.expires) {
-                    console.log(`📱 Dados carregados do fallback local: ${code}`);
-                    return parsed.data;
-                } else {
-                    localStorage.removeItem(`SYNC_${code}`);
-                    console.log(`⏰ Código ${code} expirado localmente`);
-                }
-            }
-            
-            console.log(`❌ Código ${code} não encontrado em lugar nenhum`);
-            return null;
-        } catch (error) {
-            console.error('❌ Erro ao carregar dados:', error);
-            return null;
-        }
-    }
-    
-    showCodeModal(code) {
-        const modal = document.getElementById('code-modal');
-        const codeElement = document.getElementById('generated-code');
-        const timerElement = document.getElementById('code-timer');
-        
-        codeElement.textContent = code;
-        modal.classList.remove('hidden');
-        setTimeout(() => modal.classList.add('show'), 10);
-        
-        // Iniciar timer de 24 horas
-        this.startCodeTimer(timerElement, code);
-    }
-    
-    hideCodeModal() {
-        const modal = document.getElementById('code-modal');
-        modal.classList.remove('show');
-        setTimeout(() => modal.classList.add('hidden'), 300);
-        
-        // Limpar timer
-        if (this.codeTimer) {
-            clearInterval(this.codeTimer);
-        }
-    }
-    
-    startCodeTimer(timerElement, code) {
-        let timeLeft = 24 * 60 * 60; // 24 horas em segundos
-        
-        this.codeTimer = setInterval(() => {
-            const hours = Math.floor(timeLeft / 3600);
-            const minutes = Math.floor((timeLeft % 3600) / 60);
-            const seconds = timeLeft % 60;
-            
-            timerElement.textContent = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-            
-            // Mudar cor conforme o tempo (últimas 2 horas = warning, última hora = danger)
-            if (timeLeft <= 3600) {
-                timerElement.className = 'code-timer danger';
-            } else if (timeLeft <= 7200) {
-                timerElement.className = 'code-timer warning';
-            }
-            
-            timeLeft--;
-            
-            if (timeLeft < 0) {
-                clearInterval(this.codeTimer);
-                localStorage.removeItem(`SYNC_${code}`);
-                const binId = localStorage.getItem(`sync_bin_${code}`);
-                if (binId) localStorage.removeItem(`sync_bin_${code}`);
-                this.hideCodeModal();
-                this.showNotification('⏰ Código expirado após 24 horas!', 'error');
-            }
-        }, 1000);
-    }
-    
-    updateSyncStatus(status) {
-        const statusElement = document.getElementById('sync-status');
-        const indicatorElement = document.getElementById('sync-indicator');
-        
-        switch (status) {
-            case 'online':
-                statusElement.textContent = 'Online';
-                indicatorElement.className = 'sync-indicator online';
-                break;
-            case 'syncing':
-                statusElement.textContent = 'Sincronizando...';
-                indicatorElement.className = 'sync-indicator syncing';
-                break;
-            default:
-                statusElement.textContent = 'Offline';
-                indicatorElement.className = 'sync-indicator';
-        }
-    }
-
-    // 🚨 SISTEMA DE BACKUP DE EMERGÊNCIA 🚨
-    // Estado atual hardcoded - v3.3.0 (19/09/2025)
-    initializeEmergencyBackup() {
-        // Listener para detectar a frase mágica
-        document.addEventListener('keyup', (e) => {
-            this.detectEmergencyPhrase(e);
         });
-        
-        // Salvar estado atual como backup de emergência (apenas uma vez)
-        if (!localStorage.getItem('EMERGENCY_BACKUP_v3_3_0')) {
-            this.createEmergencyBackup();
+    }
+
+    // Enviar notificação avançada do navegador
+    sendAdvancedBrowserNotification(title, body, options = {}) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            const notification = new Notification(title, {
+                body: body,
+                icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🎂</text></svg>',
+                badge: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🎂</text></svg>',
+                tag: `birthday-reminder-${options.birthday?.id || Date.now()}`,
+                requireInteraction: options.priority === 'high' && this.advancedNotificationSettings.persistentNotifications,
+                silent: !this.advancedNotificationSettings.soundEnabled,
+                timestamp: Date.now(),
+                data: {
+                    birthdayId: options.birthday?.id,
+                    birthdayName: options.birthday?.name,
+                    daysUntil: options.daysUntil,
+                    url: window.location.href
+                }
+            });
+
+            // Adicionar event listeners
+            notification.onclick = (event) => {
+                event.preventDefault();
+                window.focus();
+                notification.close();
+            };
+
+            // Fechar automaticamente se não for persistente
+            if (!this.advancedNotificationSettings.persistentNotifications || options.priority !== 'high') {
+                setTimeout(() => notification.close(), 8000);
+            }
+
+            return notification;
         }
     }
 
-    detectEmergencyPhrase(event) {
-        if (!this.emergencyBuffer) this.emergencyBuffer = '';
+    // Alternar configurações de notificação
+    toggleNotificationSettings() {
+        const content = document.getElementById('settings-content');
+        const toggleBtn = document.getElementById('toggle-settings');
         
-        // Adicionar caractere ao buffer
-        if (event.key.length === 1 || event.key === ' ') {
-            this.emergencyBuffer += event.key.toLowerCase();
-        }
-        
-        // Manter apenas os últimos 30 caracteres
-        if (this.emergencyBuffer.length > 30) {
-            this.emergencyBuffer = this.emergencyBuffer.slice(-30);
-        }
-        
-        // Verificar se contém a frase mágica
-        if (this.emergencyBuffer.includes('aqui deu merda patrao')) {
-            this.executeEmergencyRestore();
-            this.emergencyBuffer = ''; // Limpar buffer
-        }
-    }
-
-    createEmergencyBackup() {
-        const emergencyData = {
-            version: '3.3.0',
-            date: '2025-09-19',
-            birthdays: [],
-            notificationSettings: {}
-        };
-        
-        localStorage.setItem('EMERGENCY_BACKUP_v3_3_0', JSON.stringify(emergencyData));
-        console.log('🚨 Backup de emergência criado para v3.3.0');
-    }
-
-    executeEmergencyRestore() {
-        const backup = localStorage.getItem('EMERGENCY_BACKUP_v3_3_0');
-        
-        if (backup) {
-            const data = JSON.parse(backup);
-            
-            // Restaurar dados
-            this.birthdays = data.birthdays;
-            this.notificationSettings = data.notificationSettings;
-            
-            // Salvar no localStorage
-            this.saveBirthdays();
-            this.saveNotificationSettings();
-            
-            // Atualizar interface
-            this.renderBirthdays();
-            this.updateStats();
-            
-            // Mostrar confirmação dramática
-            this.showNotification('🚨 SISTEMA RESTAURADO! Voltamos ao ponto seguro v3.3.0! 🚨', 'success');
-            
-            console.log('🚨 EMERGÊNCIA ATIVADA! Sistema restaurado para v3.3.0');
-            
-            // Adicionar efeito visual dramático
-            document.body.style.animation = 'shake 0.5s ease-in-out 3';
-            setTimeout(() => {
-                document.body.style.animation = '';
-            }, 1500);
+        if (content.classList.contains('collapsed')) {
+            content.classList.remove('collapsed');
+            toggleBtn.classList.add('rotated');
         } else {
-            this.showNotification('❌ Backup de emergência não encontrado!', 'error');
+            content.classList.add('collapsed');
+            toggleBtn.classList.remove('rotated');
         }
+    }
+
+    // Carregar configurações para a interface
+    loadSettingsToInterface() {
+        const settings = this.advancedNotificationSettings;
+        
+        if (document.getElementById('notify-on-day')) {
+            document.getElementById('notify-on-day').checked = settings.notifyOnDay;
+            document.getElementById('notify-day-before').checked = settings.notifyDayBefore;
+            document.getElementById('notify-3-days').checked = settings.notify3DaysBefore;
+            document.getElementById('notify-1-week').checked = settings.notify1WeekBefore;
+            document.getElementById('notify-2-weeks').checked = settings.notify2WeeksBefore;
+            document.getElementById('notify-1-month').checked = settings.notify1MonthBefore;
+            document.getElementById('sound-enabled').checked = settings.soundEnabled;
+            document.getElementById('persistent-notifications').checked = settings.persistentNotifications;
+            document.getElementById('background-notifications').checked = settings.enabled;
+        }
+    }
+
+    // Atualizar configuração individual
+    updateNotificationSetting(settingId, value) {
+        const settingMap = {
+            'notify-on-day': 'notifyOnDay',
+            'notify-day-before': 'notifyDayBefore',
+            'notify-3-days': 'notify3DaysBefore',
+            'notify-1-week': 'notify1WeekBefore',
+            'notify-2-weeks': 'notify2WeeksBefore',
+            'notify-1-month': 'notify1MonthBefore',
+            'sound-enabled': 'soundEnabled',
+            'persistent-notifications': 'persistentNotifications',
+            'background-notifications': 'enabled'
+        };
+
+        const settingKey = settingMap[settingId];
+        if (settingKey) {
+            this.advancedNotificationSettings[settingKey] = value;
+            console.log(`Configuração ${settingKey} alterada para:`, value);
+        }
+    }
+
+    // Salvar configurações de notificação
+    saveNotificationSettings() {
+        this.saveAdvancedNotificationSettings();
+        
+        // Atualizar Service Worker com novas configurações
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+                type: 'UPDATE_SETTINGS',
+                settings: this.advancedNotificationSettings
+            });
+        }
+
+        this.showNotification('Configurações de notificação salvas com sucesso!', 'success');
+        
+        // Reativar notificações em background se necessário
+        if (this.advancedNotificationSettings.enabled) {
+            this.activateBackgroundNotifications();
+        }
+    }
+
+    // Testar notificação
+    testNotification() {
+        const testMessages = [
+            '🎉 Esta é uma notificação de teste! 🎂',
+            '🎈 Testando o sistema de lembretes!',
+            '⏰ Notificação funcionando perfeitamente!',
+            '🎁 Seu sistema de aniversários está ativo!'
+        ];
+
+        const randomMessage = testMessages[Math.floor(Math.random() * testMessages.length)];
+        
+        this.showNotificationBanner(randomMessage);
+        this.sendAdvancedBrowserNotification('Teste de Notificação', randomMessage, {
+            priority: 'normal',
+            birthday: { name: 'Sistema de Teste', id: 'test' },
+            daysUntil: 0
+        });
+
+        console.log('Notificação de teste enviada');
     }
 }
 
@@ -1056,9 +993,55 @@ document.addEventListener('DOMContentLoaded', () => {
     window.birthdayManager = new BirthdayManager();
 });
 
-// Service Worker para notificações em background (opcional)
+// Service Worker para notificações em background
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(err => {
-        console.log('Service Worker registration failed:', err);
+    navigator.serviceWorker.register('sw.js').then(registration => {
+        console.log('Service Worker registrado com sucesso:', registration);
+        
+        // Verificar quando o Service Worker está pronto
+        navigator.serviceWorker.ready.then(() => {
+            console.log('Service Worker pronto para notificações em background');
+        });
+    }).catch(err => {
+        console.log('Falha no registro do Service Worker:', err);
+    });
+
+    // Lidar com mensagens do Service Worker
+    navigator.serviceWorker.addEventListener('message', event => {
+        if (event.data) {
+            switch (event.data.type) {
+                case 'BIRTHDAY_NOTIFICATION':
+                    if (window.birthdayManager) {
+                        window.birthdayManager.showNotificationBanner(event.data.message);
+                    }
+                    break;
+                case 'UPDATE_NOTIFICATION_SETTINGS':
+                    if (window.birthdayManager) {
+                        window.birthdayManager.notificationSettings = {
+                            ...window.birthdayManager.notificationSettings,
+                            ...event.data.settings
+                        };
+                        window.birthdayManager.saveNotificationSettings();
+                    }
+                    break;
+            }
+        }
     });
 }
+
+// Detectar quando a página fica visível novamente
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && window.birthdayManager) {
+        // Verificar notificações quando a página volta a ficar visível
+        window.birthdayManager.checkNotifications();
+        window.birthdayManager.checkAdvancedNotifications();
+    }
+});
+
+// Verificar notificações quando a página ganha foco
+window.addEventListener('focus', () => {
+    if (window.birthdayManager) {
+        window.birthdayManager.checkNotifications();
+        window.birthdayManager.checkAdvancedNotifications();
+    }
+});
